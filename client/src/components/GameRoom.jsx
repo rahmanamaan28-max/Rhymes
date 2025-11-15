@@ -1,29 +1,49 @@
 import React, { useState, useEffect, useContext } from 'react'
 import { GameStateContext } from '../context/GameStateContext'
-import confetti from 'canvas-confetti'
 
 const GameRoom = ({ onViewChange }) => {
   const { socket, gameState, playerInfo } = useContext(GameStateContext)
   const [players, setPlayers] = useState([])
   const [currentWord, setCurrentWord] = useState('')
-  const [isChuck, setIsChuck] = useState(false)
+  const [chuckPlayer, setChuckPlayer] = useState(null)
   const [answer, setAnswer] = useState('')
   const [roundResults, setRoundResults] = useState(null)
   const [timeLeft, setTimeLeft] = useState(20)
 
   useEffect(() => {
-    socket.on('playersUpdated', setPlayers)
-    socket.on('yourTurnAsChuck', () => setIsChuck(true))
-    socket.on('wordRevealed', ({ word }) => setCurrentWord(word))
+    const handlePlayersUpdated = (playersList) => setPlayers(playersList)
+    const handleNewRound = (data) => {
+      setChuckPlayer(data.chuckId)
+      setCurrentWord('')
+      setRoundResults(null)
+      setTimeLeft(20)
+    }
+    const handleWordRevealed = ({ word }) => setCurrentWord(word)
+    const handleRoundResults = (results) => {
+      setRoundResults(results)
+      if (results.winner) {
+        import('canvas-confetti').then((confetti) => {
+          confetti.default({
+            particleCount: 100,
+            spread: 70,
+            origin: { y: 0.6 }
+          })
+        })
+      }
+    }
+
+    socket.on('playersUpdated', handlePlayersUpdated)
+    socket.on('newRound', handleNewRound)
+    socket.on('wordRevealed', handleWordRevealed)
     socket.on('roundResults', handleRoundResults)
 
     return () => {
-      socket.off('playersUpdated')
-      socket.off('yourTurnAsChuck')
-      socket.off('wordRevealed')
-      socket.off('roundResults')
+      socket.off('playersUpdated', handlePlayersUpdated)
+      socket.off('newRound', handleNewRound)
+      socket.off('wordRevealed', handleWordRevealed)
+      socket.off('roundResults', handleRoundResults)
     }
-  }, [])
+  }, [socket])
 
   useEffect(() => {
     if (timeLeft > 0 && (gameState === 'chuckTurn' || gameState === 'answering')) {
@@ -35,7 +55,6 @@ const GameRoom = ({ onViewChange }) => {
   const handleSubmitWord = () => {
     if (currentWord.trim()) {
       socket.emit('submitWord', currentWord.trim())
-      setIsChuck(false)
     }
   }
 
@@ -46,18 +65,6 @@ const GameRoom = ({ onViewChange }) => {
     }
   }
 
-  const handleRoundResults = (results) => {
-    setRoundResults(results)
-    if (results.winner) {
-      confetti({
-        particleCount: 100,
-        spread: 70,
-        origin: { y: 0.6 }
-      })
-    }
-    setTimeout(() => setRoundResults(null), 5000)
-  }
-
   const getLifeDisplay = (lives) => {
     const quack = 'QUACK'
     return quack.split('').map((letter, index) => (
@@ -66,6 +73,8 @@ const GameRoom = ({ onViewChange }) => {
       </span>
     ))
   }
+
+  const isCurrentPlayerChuck = playerInfo && chuckPlayer === socket.id
 
   return (
     <div className="panel">
@@ -102,13 +111,13 @@ const GameRoom = ({ onViewChange }) => {
               padding: '16px',
               background: 'var(--bg-light)',
               borderRadius: '8px',
-              border: player.id === isChuck ? '3px solid var(--accent-gold)' : '1px solid rgba(255,255,255,0.1)'
+              border: player.id === chuckPlayer ? '3px solid var(--accent-gold)' : '1px solid rgba(255,255,255,0.1)'
             }}
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div>
                 <strong>{player.username}</strong>
-                {player.id === isChuck && <span className="chuck-highlight">🐥 Chuck</span>}
+                {player.id === chuckPlayer && <span className="chuck-highlight">🐥 Chuck</span>}
               </div>
               <div>Score: {player.score}</div>
             </div>
@@ -121,7 +130,7 @@ const GameRoom = ({ onViewChange }) => {
 
       {/* Game Area */}
       <div style={{ marginBottom: '24px' }}>
-        {gameState === 'chuckTurn' && isChuck && (
+        {gameState === 'chuckTurn' && isCurrentPlayerChuck && (
           <div className="fade-in">
             <h3 style={{ textAlign: 'center', marginBottom: '16px' }}>
               🎯 Your turn as Chuck! Enter a word:
@@ -186,19 +195,27 @@ const GameRoom = ({ onViewChange }) => {
           }}>
             <h3 style={{ textAlign: 'center', marginBottom: '16px' }}>Round Results</h3>
             <div style={{ display: 'grid', gap: '8px' }}>
-              {Object.entries(roundResults.answers).map(([playerId, word]) => (
-                <div key={playerId} style={{ 
-                  display: 'flex', 
-                  justifyContent: 'space-between',
-                  padding: '8px',
-                  background: 'rgba(255,255,255,0.1)',
-                  borderRadius: '4px'
-                }}>
-                  <span>{players.find(p => p.id === playerId)?.username}:</span>
-                  <strong>{word}</strong>
-                </div>
-              ))}
+              {Object.entries(roundResults.answers || {}).map(([playerId, word]) => {
+                const player = players.find(p => p.id === playerId)
+                return (
+                  <div key={playerId} style={{ 
+                    display: 'flex', 
+                    justifyContent: 'space-between',
+                    padding: '8px',
+                    background: 'rgba(255,255,255,0.1)',
+                    borderRadius: '4px'
+                  }}>
+                    <span>{player?.username}:</span>
+                    <strong>{word}</strong>
+                  </div>
+                )
+              })}
             </div>
+            {roundResults.winner && (
+              <div style={{ textAlign: 'center', marginTop: '16px' }}>
+                <h3>🎉 Winner: {roundResults.winner.username} 🎉</h3>
+              </div>
+            )}
           </div>
         )}
       </div>
