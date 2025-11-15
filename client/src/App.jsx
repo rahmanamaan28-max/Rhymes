@@ -6,6 +6,7 @@ import ModeSelection from './components/ModeSelection'
 import { GameStateProvider } from './context/GameStateContext'
 import './styles/global.css'
 
+// Initialize socket connection
 const socket = io('http://localhost:3001')
 
 function App() {
@@ -19,14 +20,15 @@ function App() {
     })
 
     socket.on('gameFinished', ({ winner }) => {
-      // Trigger confetti animation
-      if (typeof window !== 'undefined' && window.confetti) {
-        window.confetti({
+      // Import confetti dynamically to avoid SSR issues
+      import('canvas-confetti').then((confettiModule) => {
+        const confetti = confettiModule.default
+        confetti({
           particleCount: 150,
           spread: 70,
           origin: { y: 0.6 }
         })
-      }
+      })
     })
 
     return () => {
